@@ -29,6 +29,6 @@ Colors: ≤7 min green, ≤17 yellow, else red.
 3. Push notifications, accounts/reputation, anti-spam (trust scores), Google/Apple Places data for hours, auto-detected waits from dwell time (opt-in).
 
 ## Deploy on Render (free)
-Render → New → Web Service → Public Git Repository → `https://github.com/Espskater102987/waitless`.
+Render → New → Web Service → Public Git Repository → `https://github.com/espskater102987/waitless`.
 Runtime Python, build `pip install -r requirements.txt`, start `python3 server.py`, health check `/api/health`. Render sets `$PORT`; the server binds 0.0.0.0.
 Leave `DEV_ALLOW_FAR` unset (off). The free tier has **no persistent disk**: the SQLite DB (reports + place cache) resets whenever the instance restarts or spins down after ~15 min idle (first load after idle takes ~30-60 s). Fine for a prototype since reports expire after 2 h anyway.
