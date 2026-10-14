@@ -1,10 +1,10 @@
-const CFG={appName:"WaitLess",fallback:[33.6971,-117.1853]/*Menifee CA*/,radius:3000,maxDist:300};
+const CFG={appName:"WaitLess",fallback:[33.6971,-117.1853]/*Menifee CA*/,radius:8000,maxRadius:15000,maxDist:300};
 const dev=new URLSearchParams(location.search).get("dev")==="1";
 const $=s=>document.querySelector(s);
 let device=localStorage.getItem("dev_id");if(!device){device=(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now().toString(36));localStorage.setItem("dev_id",device)}
-let me=null,places=[],filter="all",sortBy="wait",q="",markers=[];
+let loaded=false,lastErr=0,me=null,places=[],filter="all",sortBy="wait",q="",markers=[];
 const map=L.map("map",{zoomControl:false}).setView(CFG.fallback,14);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:"tiles",attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(map);
 let meDot=null;
 function toast(t){const e=$("#toast");e.textContent=t;e.classList.remove("hidden");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.add("hidden"),3000)}
 function color(m){return m==null?"n":m<=7?"g":m<=17?"y":"r"}
@@ -15,13 +15,14 @@ function pill(s,label,p){if(s)return `<div><span class="pill ${color(s.minutes)}
  if(p.typical_min!=null&&label==="drive-thru")return `<div><span class="pill e">~${p.typical_min} min</span> est.</div>`;return ""}
 function kindName(k){return k==="fast_food"?"Fast food":k==="cafe"?"Café":"Restaurant"}
 function dist(m){return m<1000?m+" m":(m/1609).toFixed(1)+" mi"}
-function visible(){return places.filter(p=>(filter==="all"||p.kind===filter)&&(!q||p.name.toLowerCase().includes(q)))}
+function visible(){const B=map.getBounds();return places.filter(p=>B.contains([p.lat,p.lon])&&(filter==="all"||p.kind===filter)&&(!q||p.name.toLowerCase().includes(q)))}
 function render(){
  markers.forEach(m=>m.remove());markers=[];
  for(const p of visible()){const b=best(p);const c=b==null?"#c7c7cc":getComputedStyle(document.body).getPropertyValue(`--${color(b)}`);
-  const m=L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:`<div class="dot" style="background:${c}"></div>`,iconSize:[22,22]})}).addTo(map).on("click",()=>openPlace(p));markers.push(m)}
+  const m=L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:`<div class="dot" style="background:${c}"></div>`,iconSize:[18,18]})}).addTo(map).on("click",()=>openPlace(p));markers.push(m)}
  const items=visible().slice().sort((a,b)=>sortBy==="dist"?a.distance_m-b.distance_m:((best(a)??999)-(best(b)??999))||a.distance_m-b.distance_m);
- $("#items").innerHTML=items.map(p=>`<li data-id="${p.id}"><div><div class="nm">${esc(p.name)}</div><div class="sub">${kindName(p.kind)} · ${dist(p.distance_m)}</div></div><div class="pills">${pill(p.status.drive_thru,"drive-thru",p)}${pill(p.status.inside,"inside",p)}${!p.status.drive_thru&&!p.status.inside&&p.typical_min==null?"No recent reports":""}</div></li>`).join("")||"<li>No places found.</li>";
+ $("#items").innerHTML=items.map(p=>`<li data-id="${p.id}"><div><div class="nm">${esc(p.name)}</div><div class="sub">${kindName(p.kind)} · ${dist(p.distance_m)}</div></div><div class="pills">${pill(p.status.drive_thru,"drive-thru",p)}${pill(p.status.inside,"inside",p)}${!p.status.drive_thru&&!p.status.inside&&p.typical_min==null?"No recent reports":""}</div></li>`).join("")||(loaded?`<li class="msg">${places.length?"No matches.":"No places found yet."}<br><button id=\"retry\">Retry</button></li>`:'<li class="msg">Loading places…</li>');
+ const rb=$("#retry");if(rb)rb.onclick=()=>load(me||CFG.fallback);
  document.querySelectorAll("#items li[data-id]").forEach(li=>li.onclick=()=>openPlace(places.find(p=>p.id===li.dataset.id)))}
 function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function hav(a,b,c,d){const R=6371e3,r=Math.PI/180,x=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
@@ -51,17 +52,29 @@ function step2(p,mode){const c=$("#sheetbody");let cars=null;
   const r=await post("/api/report",{place_id:p.id,mode,wait_min:+b.dataset.w,cars,lat:pos[0],lon:pos[1],dev});
   if(r.ok){p.status=r.status;toast("Thanks! Report added.");close();render()}else toast(r.error)})}
 async function post(u,b){try{const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...b,device})});return await r.json()}catch(e){return{error:"Network error"}}}
-async function load(center){try{const r=await fetch(`/api/places?lat=${center[0]}&lon=${center[1]}&radius=${CFG.radius}`);places=(await r.json()).places||[];render()}catch(e){toast("Couldn't load places")}}
-function locate(){if(!navigator.geolocation){load(CFG.fallback);return}
- navigator.geolocation.getCurrentPosition(p=>{me=[p.coords.latitude,p.coords.longitude];map.setView(me,15);
-  if(meDot)meDot.remove();meDot=L.circleMarker(me,{radius:8,color:"#fff",weight:3,fillColor:"#0a84ff",fillOpacity:1}).addTo(map);load(me)},
-  ()=>{toast("Location off — showing Menifee");load(CFG.fallback)},{enableHighAccuracy:true,timeout:8000})}
+async function load(center,tries=0,radius=CFG.radius){if(!loaded){$("#items").innerHTML='<li class="msg">Loading places…</li>'}
+ try{const r=await fetch(`/api/places?lat=${center[0]}&lon=${center[1]}&radius=${Math.round(radius)}`);const d=await r.json();
+  if(d.places&&d.places.length){places=d.places;loaded=true;render();return}
+  if(tries<3){$("#items").innerHTML='<li class="msg">Still loading places… (map data service is slow)</li>';setTimeout(()=>load(center,tries+1,radius),4000*(tries+1));return}
+  loaded=true;render()}
+ catch(e){if(tries<3){$("#items").innerHTML='<li class="msg">Waking up the server…</li>';setTimeout(()=>load(center,tries+1,radius),5000);return}
+  loaded=true;render();toast("Couldn't load places")}}
+function locate(){if(!navigator.geolocation){loadView();return}
+ navigator.geolocation.getCurrentPosition(p=>{me=[p.coords.latitude,p.coords.longitude];map.setView(me,14);
+  if(meDot)meDot.remove();meDot=L.circleMarker(me,{radius:8,color:"#fff",weight:3,fillColor:"#0a84ff",fillOpacity:1}).addTo(map);loadView()},
+  ()=>{toast("Location off — showing Menifee");loadView()},{enableHighAccuracy:true,timeout:8000})}
 $("#locate").onclick=locate;
-document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button,.view").forEach(x=>x.classList.remove("on"));b.classList.add("on");$("#"+b.dataset.v).classList.add("on");map.invalidateSize()});
+const LS=$("#list");$("#grab").onclick=()=>LS.classList.toggle("full");
+{let y0=null;$("#grab").addEventListener("touchstart",e=>{y0=e.touches[0].clientY},{passive:true});
+ $("#grab").addEventListener("touchend",e=>{if(y0==null)return;const dy=e.changedTouches[0].clientY-y0;if(dy<-30)LS.classList.add("full");else if(dy>30)LS.classList.remove("full");y0=null})}
 document.querySelectorAll("#filter button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#filter button").forEach(x=>x.classList.remove("on"));b.classList.add("on");filter=b.dataset.f;render()});
 document.querySelectorAll("#sort button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#sort button").forEach(x=>x.classList.remove("on"));b.classList.add("on");sortBy=b.dataset.s;render()});
 $("#search").oninput=e=>{q=e.target.value.toLowerCase().trim();render()};
-if(location.hash==="#list")document.querySelector('nav [data-v=list]').click();
-setInterval(()=>load(me||CFG.fallback),60000);
+if(location.hash==="#list")LS.classList.add("full");
+let mvT=null,lastC=null,tooFar=false;function loadView(){const c=map.getCenter(),b=map.getBounds();const r=c.distanceTo(b.getNorthEast());
+ if(r>CFG.maxRadius){tooFar=true;markers.forEach(m=>m.remove());markers=[];$("#items").innerHTML='<li class="msg">Zoom in to see restaurants</li>';return}
+ tooFar=false;lastC=[c.lat,c.lng,Math.max(500,r)];load(lastC.slice(0,2),0,lastC[2])}
+map.on("moveend",()=>{clearTimeout(mvT);mvT=setTimeout(loadView,700)});
+setInterval(()=>tooFar?0:lastC?load(lastC.slice(0,2),0,lastC[2]):load(me||CFG.fallback),60000);
 locate();
 if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js");
