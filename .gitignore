@@ -1,0 +1,9 @@
+waitapp.db*
+screenshots/
+bin/
+tunnel.log
+PUBLIC_URL.txt
+server.log
+node_modules/
+package*.json
+__pycache__/
